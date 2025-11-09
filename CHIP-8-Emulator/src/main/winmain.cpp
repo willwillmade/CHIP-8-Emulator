@@ -1,4 +1,3 @@
-
 #if _MSC_VER >= 1910 && _MSC_VER <= 1916
 // E1097 unknown attribute "no_init_all"
 // https://developercommunity.visualstudio.com/t/vs-2017-1592-reports-unknown-attribute-no-init-all/387702
@@ -33,20 +32,321 @@ using std::cout;
 using std::endl;
 using std::cerr;
 
-void output_debug_string_f(const TCHAR* format, ...);
-
+#pragma region Platform
 const TCHAR className[] = _T("CHIP-8 Emulator");
-static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-struct WindowData {
-	bool needResize;
-	int width, height;
-};
-
+static void output_debug_string_f(const TCHAR* format, ...);
+static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static bool open_chip8_file(HWND hwnd, TCHAR* filepath);
+#pragma region UI
 #define ID_FILE_LOAD_ROM					512
 #define ID_FILE_EXIT						WM_DESTROY
 #define ID_SETTING_CONFIG					1024
+
 void add_menu(HWND hwnd);
+#pragma endregion // UI
+#pragma endregion // Platform
+
+#pragma region OpenGL 1.5
+static void setup_gl();
+static void set_pixel_size(GLfloat w, GLfloat h);
+static void resize_gl(GLdouble w, GLdouble h);
+static void draw_grid_pixels(int x, int y, int w, int h, GLenum format, GLenum type, const GLvoid* pixels);
+static void set_texture_paramaters(GLuint textureID, GLint wrap, GLint filter);
+static void draw_rgba2d(GLuint textureID, GLint srcWidth, GLint srcHeight, GLubyte* pixels);
+static void draw_grayscale_2d(GLuint textureID, GLint srcWidth, GLint srcHeight, GLubyte* pixels);
+static void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLint srcWidth, GLint srcHeight, GLubyte* pixels);
+#pragma endregion
+
+#pragma region App
+typedef struct AppData {
+	bool needResize;
+	int width, height;
+} AppData;
+static void update_pixels(GLubyte* pixels, int& pixelNum, int comp);
+static void project_to_screen(float xScale, float yScale, GLuint textureID, GLubyte* pixels);
+
+static void chip8_map_to_screen(float xScale, float yScale, GLuint textureID, Chip8& chip8);
+static void chip8_map_to_screen(float xScale, float yScale, GLuint vbo, GLuint textureID, Chip8& chip8);
+// https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+static void chip8_keydown_events(MSG& msg, Chip8& chip8);
+static void chip8_keyup_events(MSG& msg, Chip8& chip8);
+#pragma endregion
+
+#pragma region Platform
+int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLine, int nCmdShow)
+{
+	WNDCLASSEX wc;
+	HWND hWnd;
+
+	if (!hPrevInstance) {
+		wc.cbSize = sizeof(WNDCLASSEX);
+		wc.style = CS_OWNDC;
+		wc.lpfnWndProc = wnd_proc;
+		wc.cbClsExtra = 0;
+		wc.cbWndExtra = 0;
+		wc.hInstance = hInstance;
+		wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+		wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)::GetStockObject(BLACK_BRUSH);
+		wc.lpszMenuName = NULL;
+		wc.lpszClassName = className;
+		wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+
+		if (!RegisterClassEx(&wc)) {
+			MessageBox(NULL, _T("Window Registration Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
+			return 0;
+		}
+	}
+
+	AppData windowData;
+	SetProcessDPIAware();
+	int clientW = Chip8::DISPLAY_W * 10, clientH = Chip8::DISPLAY_H * 10;
+	RECT rc = { 0, 0, clientW, clientH };
+	AdjustWindowRectEx(&rc, WS_OVERLAPPEDWINDOW, TRUE, WS_EX_CLIENTEDGE);
+	hWnd = CreateWindowEx(
+		WS_EX_CLIENTEDGE,
+		className,
+		className,
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
+		NULL, NULL, hInstance, &windowData);
+	if (hWnd == NULL)
+	{
+		MessageBox(NULL, _T("Window Creation Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
+		return 0;
+	}
+	add_menu(hWnd);
+
+	ShowWindow(hWnd, nCmdShow);
+	UpdateWindow(hWnd);
+
+	const int comp = 4;
+	GLubyte pixels[Chip8::DISPLAY_H * Chip8::DISPLAY_W * comp];
+	fill(begin(pixels), begin(pixels) + Chip8::DISPLAY_H * Chip8::DISPLAY_W * comp, 0);
+	int pixelNum = 0;
+
+	GLuint screenTextureID = 0;
+	GLuint screenVBO = 0;
+
+	HDC hDC = GetDC(hWnd);
+	HGLRC glContext = create_gl_context(hWnd, hDC);
+	wglMakeCurrent(hDC, glContext);
+	bool glSupported = gladLoadGL();
+	if (glSupported) {
+		bool wglLoaded = setup_wgl_functions();
+		if (!wglSwapIntervalEXT(0)) {
+			DWORD error = GetLastError();
+			// ERROR_INVALID_DATA or ERROR_DC_NOT_FOUND
+			output_debug_string_f(_T("wglSwapIntervalEXT failed with arg(%d): %d\n"), 1, error);
+		}
+		setup_gl();
+
+		GLfloat vertices[] = {
+			0, 0, 0, 1,
+			1, 0, 1, 1,
+			1, 1, 1, 0,
+			0, 1, 0, 0
+		};
+		GLfloat texCoords[] = {
+			0.0f, 1.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f
+		};
+		glGenBuffers(1, &screenVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, screenVBO);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+		glGenTextures(1, &screenTextureID);
+		set_texture_paramaters(screenTextureID, GL_CLAMP_TO_EDGE, GL_NEAREST);
+	}
+
+	AppData* data = (AppData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+	Chip8 chip8;
+
+	LARGE_INTEGER startingTime, endingTime, elapsedMicroseconds;
+	LARGE_INTEGER frequency;
+	QueryPerformanceFrequency(&frequency);
+	QueryPerformanceCounter(&startingTime);
+	int fps = 60;
+	bool running = true;
+	MSG msg;
+	while (running) {
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			if (glSupported && data && data->needResize) {
+				data->needResize = false;
+				OutputDebugString(_T("main loop resize\n"));
+				resize_gl(data->width, data->height);
+			}
+
+			switch (msg.message)
+			{
+			case WM_CLOSE:
+				// confirm close message or pass control to DefWindowProc
+				DefWindowProc(hWnd, msg.message, msg.wParam, msg.lParam);
+				break;
+			case WM_QUIT:
+				running = false;
+				break;
+			case WM_COMMAND: {
+				switch (LOWORD(msg.wParam)) {
+				case ID_FILE_LOAD_ROM: {
+					TCHAR filepath[MAX_PATH] = { 0 };
+					if (open_chip8_file(hWnd, filepath)) {
+						chip8.load_rom(filepath);
+					}
+				}
+									   break;
+				case ID_FILE_EXIT:
+					PostMessage(hWnd, WM_CLOSE, 0, 0);
+					break;
+				}
+			}
+							 break;
+			case WM_KEYDOWN:
+				chip8_keydown_events(msg, chip8);
+				break;
+			case WM_KEYUP:
+				chip8_keyup_events(msg, chip8);
+				break;
+			default:
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+				break;
+			}
+		}
+
+		//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		//update_pixels(pixels, pixelNum, comp);
+		//draw_grid_pixels(50, 50, Chip8::DISPLAY_W, Chip8::DISPLAY_H, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+		//project_to_screen(data->width*1.f, data->height*1.f, screenTextureID, pixels);
+
+		//GLubyte grayscalePixels[Chip8::DISPLAY_H * Chip8::DISPLAY_W];
+		//for (int i = 0; i < Chip8::DISPLAY_H * Chip8::DISPLAY_W; ++i) {
+		//	grayscalePixels[i] = (rand() % 2) * 255;
+		//}
+		//chip8_map_to_screen(data->width*1.f, data->height*1.f, screenTextureID, &grayscalePixels[0]);
+
+		if (chip8.is_ROM_opened()) {
+			uint16_t code = chip8.fetch_code();
+			chip8.execute_code(code);
+
+			QueryPerformanceCounter(&endingTime);
+			elapsedMicroseconds.QuadPart = endingTime.QuadPart - startingTime.QuadPart;
+			elapsedMicroseconds.QuadPart *= 1000000;
+			elapsedMicroseconds.QuadPart /= frequency.QuadPart;
+			if (elapsedMicroseconds.QuadPart > 1000000 / fps) {
+				QueryPerformanceCounter(&startingTime);
+
+				chip8.countdown();
+				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+				chip8_map_to_screen(data->width*1.f, data->height*1.f, screenVBO, screenTextureID, chip8);
+				glFinish();
+			}
+		}
+
+		SwapBuffers(hDC);
+	}
+
+	return (int)msg.wParam;
+}
+
+LRESULT CALLBACK wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	AppData* data = (AppData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+	if (msg == WM_CREATE) {
+		CREATESTRUCT* create = reinterpret_cast<CREATESTRUCT*>(lParam);
+		data = reinterpret_cast<AppData*>(create->lpCreateParams);
+		SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)data);
+		return 0;
+	}
+	switch (msg)
+	{
+	case WM_SIZE:
+		output_debug_string_f(_T("wnd_proc WM_SIZE: %d %d\n"), LOWORD(lParam), HIWORD(lParam));
+		data->needResize = true;
+		data->width = LOWORD(lParam);
+		data->height = HIWORD(lParam);
+		//SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)data);
+		return DefWindowProc(hWnd, msg, wParam, lParam);
+	case WM_SYSCOMMAND:
+		if (wParam == SC_CLOSE) {
+			PostMessage(hWnd, WM_CLOSE, wParam, lParam);
+			return 0;
+		}
+		return DefWindowProc(hWnd, msg, wParam, lParam);
+	case WM_DESTROY:
+		PostQuitMessage(0);
+		return 0;
+	default:
+		return DefWindowProc(hWnd, msg, wParam, lParam);
+	}
+}
+
+void output_debug_string_f(const TCHAR* format, ...)
+{
+	TCHAR buffer[1024] = {}; // A reasonably sized buffer for debug messages
+	va_list args;
+
+	va_start(args, format);
+	int size = _vsntprintf_s(buffer, _countof(buffer), _TRUNCATE, format, args);
+	va_end(args);
+
+	OutputDebugString(buffer);
+}
+
+bool open_chip8_file(HWND hwnd, TCHAR* filepath)
+{
+	TCHAR fileDirectory[MAX_PATH] = { 0 };
+	DWORD res = GetCurrentDirectory(MAX_PATH, fileDirectory);
+	OPENFILENAME ofn = { 0 };
+	ofn.lStructSize = sizeof(OPENFILENAME);
+	ofn.hwndOwner = hwnd;
+	ofn.lpstrFile = filepath;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrFilter = _T("Chip8 Files\0*.ch8\0");
+	ofn.nFilterIndex = 1; // 1-based
+	ofn.lpstrInitialDir = fileDirectory;
+	ofn.Flags = OFN_READONLY | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+	if (GetOpenFileName(&ofn)) {
+		cout << "Selected file: " << filepath << std::endl;
+		return true;
+	}
+	else {
+		// User canceled or an error occurred
+		DWORD error = CommDlgExtendedError();
+		if (error != 0) {
+			cerr << "Error in GetOpenFileName: " << error << endl;
+		}
+		else {
+			cout << "File selection canceled." << endl;
+		}
+		return false;
+	}
+}
+#pragma endregion
+
+#pragma region UI
+void add_menu(HWND hwnd)
+{
+	HMENU menuBar = CreateMenu();
+
+	HMENU fileMenu = CreateMenu();
+	AppendMenu(fileMenu, MF_STRING, ID_FILE_LOAD_ROM, _T("Load ROM"));
+	AppendMenu(fileMenu, MF_STRING, ID_FILE_EXIT, _T("Exit"));
+
+	HMENU settingMenu = CreateMenu();
+	AppendMenu(settingMenu, MF_STRING, ID_SETTING_CONFIG, _T("Config"));
+
+	AppendMenu(menuBar, MF_POPUP, (UINT_PTR)fileMenu, _T("&File"));
+	AppendMenu(menuBar, MF_POPUP, (UINT_PTR)settingMenu, _T("&Setting"));
+
+	SetMenu(hwnd, menuBar);
+}
+#pragma endregion
 
 #pragma region OpenGL 1.5
 void setup_gl()
@@ -169,7 +469,7 @@ void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLint srcWi
 		pixels);
 	glBindBuffer(GL_VERTEX_ARRAY, vbo);
 	glVertexPointer(2, GL_FLOAT, stride, (GLvoid*)0);
-	glTexCoordPointer(2, GL_FLOAT, stride, (GLvoid*)(sizeof(GLfloat)*2));
+	glTexCoordPointer(2, GL_FLOAT, stride, (GLvoid*)(sizeof(GLfloat) * 2));
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -181,295 +481,7 @@ void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLint srcWi
 }
 #pragma endregion
 
-#pragma region Platform
-static void output_debug_string_f(const TCHAR* format, ...);
-static bool open_chip8_file(HWND hwnd, TCHAR* filepath);
-#pragma endregion
-
-static void update_pixels(GLubyte* pixels, int& pixelNum, int comp);
-static void project_to_screen(float xScale, float yScale, GLuint textureID, GLubyte* pixels);
-
-static void chip8_map_to_screen(float xScale, float yScale, GLuint textureID, Chip8& chip8);
-static void chip8_map_to_screen(float xScale, float yScale, GLuint vbo, GLuint textureID, Chip8& chip8);
-// https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
-static void chip8_keydown_events(MSG& msg, Chip8& chip8);
-static void chip8_keyup_events(MSG& msg, Chip8& chip8);
-
-int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLine, int nCmdShow)
-{
-	WNDCLASSEX wc;
-	HWND hWnd;
-
-	if (!hPrevInstance) {
-		wc.cbSize = sizeof(WNDCLASSEX);
-		wc.style = CS_OWNDC;
-		wc.lpfnWndProc = WndProc;
-		wc.cbClsExtra = 0;
-		wc.cbWndExtra = 0;
-		wc.hInstance = hInstance;
-		wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-		wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-		wc.hbrBackground = (HBRUSH)::GetStockObject(BLACK_BRUSH);
-		wc.lpszMenuName = NULL;
-		wc.lpszClassName = className;
-		wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
-
-		if (!RegisterClassEx(&wc)) {
-			MessageBox(NULL, _T("Window Registration Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
-			return 0;
-		}
-	}
-
-	WindowData windowData;
-	SetProcessDPIAware();
-	int clientW = Chip8::DISPLAY_W*10, clientH = Chip8::DISPLAY_H*10;
-	RECT rc = { 0, 0, clientW, clientH };
-	AdjustWindowRectEx(&rc, WS_OVERLAPPEDWINDOW, TRUE, WS_EX_CLIENTEDGE);
-	hWnd = CreateWindowEx(
-		WS_EX_CLIENTEDGE,
-		className,
-		className,
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT, CW_USEDEFAULT, rc.right-rc.left, rc.bottom-rc.top,
-		NULL, NULL, hInstance, &windowData);
-	if (hWnd == NULL)
-	{
-		MessageBox(NULL, _T("Window Creation Failed!"), _T("Error!"), MB_ICONEXCLAMATION | MB_OK);
-		return 0;
-	}
-	add_menu(hWnd);
-
-	ShowWindow(hWnd, nCmdShow);
-	UpdateWindow(hWnd);
-
-	const int comp = 4;
-	GLubyte pixels[Chip8::DISPLAY_H * Chip8::DISPLAY_W * comp];
-	fill(begin(pixels), begin(pixels) + Chip8::DISPLAY_H * Chip8::DISPLAY_W * comp, 0);
-	int pixelNum = 0;
-
-	GLuint screenTextureID = 0;
-	GLuint screenVBO = 0;
-
-	HDC hDC = GetDC(hWnd);
-	HGLRC glContext = create_gl_context(hWnd, hDC);
-	wglMakeCurrent(hDC, glContext);
-	bool glSupported = gladLoadGL();
-	if (glSupported) {
-		bool wglLoaded = setup_wgl_functions();
-		if (!wglSwapIntervalEXT(0)) {
-			DWORD error = GetLastError();
-			// ERROR_INVALID_DATA or ERROR_DC_NOT_FOUND
-			output_debug_string_f(_T("wglSwapIntervalEXT failed with arg(%d): %d\n"), 1, error);
-		}
-		setup_gl();
-		
-		GLfloat vertices[] = {
-			0, 0, 0, 1,
-			1, 0, 1, 1,
-			1, 1, 1, 0,
-			0, 1, 0, 0
-		};
-		GLfloat texCoords[] = {
-			0.0f, 1.0f,
-			1.0f, 1.0f,
-			1.0f, 0.0f,
-			0.0f, 0.0f
-		};
-		glGenBuffers(1, &screenVBO);
-		glBindBuffer(GL_ARRAY_BUFFER, screenVBO);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-		
-		glGenTextures(1, &screenTextureID);
-		set_texture_paramaters(screenTextureID, GL_CLAMP_TO_EDGE, GL_NEAREST);
-	}
-
-	WindowData* data = (WindowData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-	Chip8 chip8;
-
-	LARGE_INTEGER startingTime, endingTime, elapsedMicroseconds;
-	LARGE_INTEGER frequency;
-	QueryPerformanceFrequency(&frequency);
-	QueryPerformanceCounter(&startingTime);
-	int fps = 60;
-	bool running = true;
-	MSG msg;
-	while (running) {
-		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-		{
-			if (glSupported && data && data->needResize) {
-				data->needResize = false;
-				OutputDebugString(_T("main loop resize\n"));
-				resize_gl(data->width, data->height);
-			}
-
-			switch (msg.message)
-			{
-			case WM_CLOSE:
-				// confirm close message or pass control to DefWindowProc
-				DefWindowProc(hWnd, msg.message, msg.wParam, msg.lParam);
-				break;
-			case WM_QUIT:
-				running = false;
-				break;
-			case WM_COMMAND: {
-				switch (LOWORD(msg.wParam)) {
-				case ID_FILE_LOAD_ROM: {
-					TCHAR filepath[MAX_PATH] = { 0 };
-					if (open_chip8_file(hWnd, filepath)) {
-						chip8.load_rom(filepath);
-					}
-				}
-				break;
-				case ID_FILE_EXIT:
-					PostMessage(hWnd, WM_CLOSE, 0, 0);
-					break;
-				}
-			}
-				break;
-			case WM_KEYDOWN:
-				chip8_keydown_events(msg, chip8);
-				break;
-			case WM_KEYUP:
-				chip8_keyup_events(msg, chip8);
-				break;
-			default:
-				TranslateMessage(&msg);
-				DispatchMessage(&msg);
-				break;
-			}
-		}
-		
-		//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-		//update_pixels(pixels, pixelNum, comp);
-		//draw_grid_pixels(50, 50, Chip8::DISPLAY_W, Chip8::DISPLAY_H, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-		//project_to_screen(data->width*1.f, data->height*1.f, screenTextureID, pixels);
-
-		/*GLubyte grayscalePixels[Chip8::DISPLAY_H * Chip8::DISPLAY_W];
-		for (int i = 0; i < Chip8::DISPLAY_H * Chip8::DISPLAY_W; ++i) {
-			grayscalePixels[i] = (rand() % 2) * 255;
-		}
-		chip8_map_to_screen(data->width*1.f, data->height*1.f, screenTextureID, &grayscalePixels[0]);*/
-		if (chip8.is_ROM_opened()) {
-			uint16_t code = chip8.fetch_code();
-			chip8.execute_code(code);
-
-			QueryPerformanceCounter(&endingTime);
-			elapsedMicroseconds.QuadPart = endingTime.QuadPart - startingTime.QuadPart;
-			elapsedMicroseconds.QuadPart *= 1000000;
-			elapsedMicroseconds.QuadPart /= frequency.QuadPart;
-			if (elapsedMicroseconds.QuadPart > 1000000 / fps) {
-				QueryPerformanceCounter(&startingTime);
-
-				chip8.countdown();
-				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-				chip8_map_to_screen(data->width*1.f, data->height*1.f, screenVBO, screenTextureID, chip8);
-				glFinish();
-			}
-		}
-
-		SwapBuffers(hDC);
-	}
-
-	return (int)msg.wParam;
-}
-
-LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-	WindowData* data = (WindowData*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-	if (msg == WM_CREATE) {
-		CREATESTRUCT* create = reinterpret_cast<CREATESTRUCT*>(lParam);
-		data = reinterpret_cast<WindowData*>(create->lpCreateParams);
-		SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)data);
-		return 0;
-	}
-	switch (msg)
-	{
-	case WM_SIZE:
-		output_debug_string_f(_T("WndProc WM_SIZE: %d %d\n"), LOWORD(lParam), HIWORD(lParam));
-		data->needResize = true;
-		data->width = LOWORD(lParam);
-		data->height = HIWORD(lParam);
-		//SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)data);
-		return DefWindowProc(hWnd, msg, wParam, lParam);
-	case WM_SYSCOMMAND:
-		if (wParam == SC_CLOSE) {
-			PostMessage(hWnd, WM_CLOSE, wParam, lParam);
-			return 0;
-		}
-		return DefWindowProc(hWnd, msg, wParam, lParam);
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	default:
-		return DefWindowProc(hWnd, msg, wParam, lParam);
-	}
-}
-
-#pragma region UI
-void add_menu(HWND hwnd)
-{
-	HMENU menuBar = CreateMenu();
-
-	HMENU fileMenu = CreateMenu();
-	AppendMenu(fileMenu, MF_STRING, ID_FILE_LOAD_ROM, _T("Load ROM"));
-	AppendMenu(fileMenu, MF_STRING, ID_FILE_EXIT, _T("Exit"));
-
-	HMENU settingsMenu = CreateMenu();
-	AppendMenu(settingsMenu, MF_STRING, ID_SETTING_CONFIG, _T("Configs"));
-
-	AppendMenu(menuBar, MF_POPUP, (UINT_PTR)fileMenu, _T("&File"));
-	AppendMenu(menuBar, MF_POPUP, (UINT_PTR)settingsMenu, _T("&Settings"));
-
-	SetMenu(hwnd, menuBar);
-}
-#pragma endregion
-
-#pragma region Platform
-void output_debug_string_f(const TCHAR* format, ...)
-{
-	TCHAR buffer[1024] = {}; // A reasonably sized buffer for debug messages
-	va_list args;
-
-	va_start(args, format);
-	int size = _vsntprintf_s(buffer, _countof(buffer), _TRUNCATE, format, args);
-	va_end(args);
-
-	OutputDebugString(buffer);
-}
-
-bool open_chip8_file(HWND hwnd, TCHAR* filepath)
-{
-	TCHAR fileDirectory[MAX_PATH] = { 0 };
-	DWORD res = GetCurrentDirectory(MAX_PATH, fileDirectory);
-	OPENFILENAME ofn = { 0 };
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = hwnd;
-	ofn.lpstrFile = filepath;
-	ofn.nMaxFile = MAX_PATH;
-	ofn.lpstrFilter = _T("Chip8 Files\0*.ch8\0");
-	ofn.nFilterIndex = 1; // 1-based
-	ofn.lpstrInitialDir = fileDirectory;
-	ofn.Flags = OFN_READONLY | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-
-	if (GetOpenFileName(&ofn)) {
-		cout << "Selected file: " << filepath << std::endl;
-		return true;
-	}
-	else {
-		// User canceled or an error occurred
-		DWORD error = CommDlgExtendedError();
-		if (error != 0) {
-			cerr << "Error in GetOpenFileName: " << error << endl;
-		}
-		else {
-			cout << "File selection canceled." << endl;
-		}
-		return false;
-	}
-}
-#pragma endregion
-
+#pragma region App
 void update_pixels(GLubyte* pixels, int& pixelNum, int comp)
 {
 	int r = (pixelNum / (Chip8::DISPLAY_W * comp)) % Chip8::DISPLAY_H;
@@ -531,7 +543,7 @@ void chip8_map_to_screen(float xScale, float yScale, GLuint vbo, GLuint textureI
 	glMatrixMode(GL_MODELVIEW);
 	glPushMatrix();
 	glScalef(xScale, yScale, 1.f);
-	draw_grayscale_2d(vbo, textureID, sizeof(GLfloat)*4, Chip8::DISPLAY_W, Chip8::DISPLAY_H, (GLubyte*)chip8.get_display_buffer());
+	draw_grayscale_2d(vbo, textureID, sizeof(GLfloat) * 4, Chip8::DISPLAY_W, Chip8::DISPLAY_H, (GLubyte*)chip8.get_display_buffer());
 	glPopMatrix();
 }
 
@@ -582,3 +594,210 @@ void chip8_keyup_events(MSG& msg, Chip8& chip8)
 	default: break;
 	}
 }
+#pragma endregion
+
+/*#if _MSC_VER >= 1910 && _MSC_VER <= 1916
+// E1097 unknown attribute "no_init_all"
+// https://developercommunity.visualstudio.com/t/vs-2017-1592-reports-unknown-attribute-no-init-all/387702
+#define no_init_all deprecated
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+#include <Windows.h>
+#include <tchar.h>
+#include <commdlg.h>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <iterator>
+#include <cstdlib>
+#include <string>
+
+#include "resource.h"
+#include "win_glcontext.h"
+#include "glad/glad.h"
+#include "wgl_loader.h"
+#include "chip8.h"
+
+using std::vector;
+using std::fill;
+using std::begin;
+using std::wstring;
+using std::cout;
+using std::endl;
+using std::cerr;
+
+#pragma region Platform
+typedef struct PlatformData {
+	HWND hWnd;
+	HDC hDC;
+	HGLRC glContext;
+} PlatformData;
+static void output_debug_string_f(const TCHAR* format, ...);
+static INT_PTR CALLBACK window_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+static void clearGLContext(PlatformData& data);
+#pragma endregion
+
+#pragma region App
+typedef struct AppData {
+	PlatformData platform;
+	int viewW, viewH;
+	int windowW, windowH;
+	bool needResize;
+} AppData;
+static void main_loop(AppData& app);
+#pragma endregion
+
+#pragma region OpenGL 1.5
+static void setup_gl();
+#pragma endregion
+
+#pragma region Platform
+int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLine, int nCmdShow)
+{
+	SetProcessDPIAware();
+	AppData app;
+	HWND hWnd = CreateDialogParam(
+		hInstance,
+		MAKEINTRESOURCE(IDD_WINDOW),
+		NULL,
+		window_proc,
+		(LPARAM)&app
+	);
+	ShowWindow(hWnd, nCmdShow);
+	UpdateWindow(hWnd);
+
+	HDC hDC = GetDC(hWnd);
+	HGLRC glContext = create_gl_context(hWnd, hDC);
+	wglMakeCurrent(hDC, glContext);
+	bool glSupported = gladLoadGL();
+	if (glSupported) {
+		bool wglLoaded = setup_wgl_functions();
+		if (!wglSwapIntervalEXT(0)) {
+			DWORD error = GetLastError();
+			// ERROR_INVALID_DATA or ERROR_DC_NOT_FOUND
+			output_debug_string_f(_T("wglSwapIntervalEXT failed with arg(%d): %d\n"), 1, error);
+		}
+		setup_gl();
+	}
+
+	app.platform.hWnd = hWnd;
+	app.platform.hDC = hDC;
+	app.platform.glContext = glContext;
+
+	bool running = true;
+	MSG msg;
+	while (running) {
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			switch (msg.message)
+			{
+			case WM_QUIT:
+				running = false;
+				break;
+			default:
+				// IsDialogMessage: able to deal with tab/enter/esc button presses
+				if (!IsDialogMessage(hWnd, &msg)) {
+					TranslateMessage(&msg);
+					DispatchMessage(&msg);
+				}
+				break;
+			}
+		}
+		if (running) {
+			main_loop(app);
+		}
+	}
+
+	return (int)msg.wParam;
+}
+
+void output_debug_string_f(const TCHAR* format, ...)
+{
+	TCHAR buffer[1024] = {}; // A reasonably sized buffer for debug messages
+	va_list args;
+
+	va_start(args, format);
+	int size = _vsntprintf_s(buffer, _countof(buffer), _TRUNCATE, format, args);
+	va_end(args);
+
+	OutputDebugString(buffer);
+}
+
+INT_PTR CALLBACK window_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	LONG_PTR ptr = GetWindowLongPtr(hDlg, GWLP_USERDATA);
+	AppData* app = (AppData*)ptr;
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
+		break;
+	case WM_CLOSE:
+		DestroyWindow(hDlg);
+		break;
+	case WM_DESTROY:
+		clearGLContext(app->platform);
+		PostQuitMessage(0);
+		break;
+	case WM_SIZE: {
+		HWND g_hWndRenderArea = GetDlgItem(hDlg, IDC_RENDER_AREA);
+		LONG g_RenderWidth;
+		LONG g_RenderHeight;
+		if (g_hWndRenderArea)
+		{
+			RECT rect;
+			GetClientRect(g_hWndRenderArea, &rect);
+
+			g_RenderWidth = rect.right - rect.left;
+			g_RenderHeight = rect.bottom - rect.top;
+
+			// InitOpenGL(g_hWndRenderArea);
+
+			SetClassLongPtr(g_hWndRenderArea, GCLP_HBRBACKGROUND, (LONG_PTR)GetStockObject(BLACK_BRUSH));
+			InvalidateRect(g_hWndRenderArea, NULL, TRUE);
+		}
+		output_debug_string_f(_T("wnd_proc WM_SIZE: %d %d, %d %d\n"), LOWORD(lParam), HIWORD(lParam), g_RenderWidth, g_RenderHeight);
+		app->needResize = true;
+		app->windowW = LOWORD(lParam);
+		app->windowH = HIWORD(lParam);
+	}
+		return (INT_PTR)FALSE;
+	default:
+		return (INT_PTR)FALSE;
+	}
+	return (INT_PTR)TRUE;
+}
+
+void clearGLContext(PlatformData& data)
+{
+	wglMakeCurrent(NULL, NULL);
+	ReleaseDC(data.hWnd, data.hDC);
+	wglDeleteContext(data.glContext);
+}
+#pragma endregion
+
+#pragma region App
+void main_loop(AppData& app)
+{
+
+}
+#pragma endregion
+
+#pragma region OpenGL 1.5
+void setup_gl()
+{
+	const char* version = (const char*)glGetString(GL_VERSION);
+	glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_TEXTURE_2D);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+#pragma endregion*/
