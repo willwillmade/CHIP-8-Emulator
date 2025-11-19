@@ -2,7 +2,6 @@
 // Microsoft Visual C++ generated include file.
 // Used by Resource.rc
 //
-#define IDD_WINDOW                      101
 #define IDD_CONFIG                      101
 #define IDC_RENDER_AREA                 1001
 #define IDC_COMBO1                      1004

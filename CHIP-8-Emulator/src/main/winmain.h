@@ -1,6 +1,5 @@
 #ifndef WIN_MAIN_H
 
-#include "glad/glad.h"
 #include "chip8.h"
 #include <tchar.h>
 
@@ -11,6 +10,7 @@
 #define NOMINMAX 1
 #endif
 #include <Windows.h>
+#include "glad/glad.h"
 
 #pragma region Platform
 const TCHAR className[] = _T("CHIP-8 Emulator");
