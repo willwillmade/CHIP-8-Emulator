@@ -157,17 +157,20 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 					PostMessage(hWnd, WM_CLOSE, 0, 0);
 					break;
 				case ID_SETTING_CONFIG: {
-					DialogBox(
+					INT_PTR res = DialogBox(
 						hInstance,
 						MAKEINTRESOURCE(IDD_CONFIG),
 						NULL,
 						config_proc
 					);
+					if (res == IDOK) {
+						bool stop = true;
+					}
 				}
 					break;
 				}
 			}
-			 break;
+			break;
 			case WM_KEYDOWN:
 				chip8_keydown_events(msg, chip8);
 				break;
@@ -259,11 +262,34 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 	case WM_INITDIALOG:
 		SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
 		break;
-	case WM_CLOSE:
-		DestroyWindow(hDlg);
-		break;
-	case WM_DESTROY:
-		PostQuitMessage(0);
+	case WM_COMMAND: {
+		WORD item = LOWORD(wParam);
+		switch (item)
+		{
+		case IDC_CHECK1:
+		case IDC_CHECK2:
+		case IDC_CHECK3:
+		case IDC_CHECK4:
+		case IDC_CHECK5:
+		case IDC_CHECK6:
+			if (HIWORD(wParam) == BN_CLICKED) {
+				HWND hCheck = GetDlgItem(hDlg, item);
+				BOOL bChecked = SendMessage(hCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+				if (bChecked) {
+					bool stop = true;
+				}
+			}
+			break;
+		case WM_CLOSE:
+		case IDC_CONFIG_CANCEL:
+			EndDialog(hDlg, IDCANCEL);
+			break;
+		case IDC_CONFIG_OK:
+			// save config
+			EndDialog(hDlg, IDOK);
+			break;
+		}
+	}
 		break;
 	default:
 		return (INT_PTR)FALSE;

@@ -11,7 +11,10 @@
 #define IDC_CHECK4                      1008
 #define IDC_CHECK5                      1009
 #define IDC_CHECK6                      1010
-#define IDC_SLIDER1                     1011
+#define IDC_FPS_SLIDER                  1011
+#define IDC_FPS_TEXT                    1012
+#define IDC_CONFIG_OK                   1013
+#define IDC_CONFIG_CANCEL               1014
 
 // Next default values for new objects
 // 
@@ -19,7 +22,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        103
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1012
+#define _APS_NEXT_CONTROL_VALUE         1015
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif
