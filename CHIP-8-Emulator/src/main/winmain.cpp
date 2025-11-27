@@ -157,14 +157,15 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 					PostMessage(hWnd, WM_CLOSE, 0, 0);
 					break;
 				case ID_SETTING_CONFIG: {
-					INT_PTR res = DialogBox(
+					INT_PTR res = DialogBoxParam(
 						hInstance,
 						MAKEINTRESOURCE(IDD_CONFIG),
 						NULL,
-						config_proc
+						config_proc,
+						(LPARAM)&app
 					);
 					if (res == IDOK) {
-						bool stop = true;
+						chip8.set_quirks(app.config.quirks);
 					}
 				}
 					break;
@@ -257,14 +258,21 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 {
 	LONG_PTR ptr = GetWindowLongPtr(hDlg, GWLP_USERDATA);
 	AppData* app = (AppData*)ptr;
+	static Chip8Quirks tempQuirks;
 	switch (message)
 	{
 	case WM_INITDIALOG:
 		SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
+		app = (AppData*)lParam;
+		CheckDlgButton(hDlg, IDC_CHECK1, app->config.quirks.resetVF ? BST_CHECKED: BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK2, app->config.quirks.shift ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK3, app->config.quirks.memoryLeaveIUnchanged ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK4, app->config.quirks.memoryIncrementByX ? BST_CHECKED : BST_UNCHECKED);
 		break;
 	case WM_COMMAND: {
-		WORD item = LOWORD(wParam);
-		switch (item)
+		WORD low = LOWORD(wParam);
+		WORD hiw = HIWORD(wParam);
+		switch (low)
 		{
 		case IDC_CHECK1:
 		case IDC_CHECK2:
@@ -273,18 +281,36 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		case IDC_CHECK5:
 		case IDC_CHECK6:
 			if (HIWORD(wParam) == BN_CLICKED) {
-				HWND hCheck = GetDlgItem(hDlg, item);
-				BOOL bChecked = SendMessage(hCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
-				if (bChecked) {
-					bool stop = true;
+				HWND hCheck = GetDlgItem(hDlg, low);
+				BOOL checked = SendMessage(hCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+				switch (low) {
+				case IDC_CHECK1:
+					tempQuirks.resetVF = checked;
+					break;
+				case IDC_CHECK2:
+					tempQuirks.shift = checked;
+					break;
+				case IDC_CHECK3:
+					tempQuirks.memoryLeaveIUnchanged = checked;
+					break;
+				case IDC_CHECK4:
+					tempQuirks.memoryIncrementByX = checked;
+					break;
+				case IDC_CHECK5:
+					break;
+				case IDC_CHECK6:
+					break;
 				}
 			}
 			break;
 		case WM_CLOSE:
+		case IDCANCEL:
 		case IDC_CONFIG_CANCEL:
 			EndDialog(hDlg, IDCANCEL);
 			break;
 		case IDC_CONFIG_OK:
+			app->config.quirks = tempQuirks;
+			// TODO: operator= overloading
 			// save config
 			EndDialog(hDlg, IDOK);
 			break;
