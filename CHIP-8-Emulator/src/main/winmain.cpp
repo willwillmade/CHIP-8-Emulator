@@ -123,6 +123,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 	LARGE_INTEGER frequency;
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&startingTime);
+	bool readyToDraw = false;
 	int fps = 60;
 	bool running = true;
 	MSG msg;
@@ -199,7 +200,11 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 
 		if (chip8.is_ROM_opened()) {
 			uint16_t code = chip8.fetch_code();
-			chip8.execute_code(code);
+			readyToDraw = app.config.vSync && chip8.is_draw_code(code);
+			if (!readyToDraw) {
+				chip8.execute_code(code);
+			}
+			
 
 			QueryPerformanceCounter(&endingTime);
 			elapsedMicroseconds.QuadPart = endingTime.QuadPart - startingTime.QuadPart;
@@ -210,6 +215,12 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 				output_debug_string_f(_T("%lu\n"), elapsedMicroseconds.QuadPart);
 
 				chip8.countdown();
+
+				if (readyToDraw) {
+					readyToDraw = false;
+					chip8.execute_code(code);
+				}
+
 				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 				chip8_map_to_screen(app.width*1.f, app.height*1.f, screenVBO, screenTextureID, chip8);
 				glFinish();
@@ -259,6 +270,7 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 	LONG_PTR ptr = GetWindowLongPtr(hDlg, GWLP_USERDATA);
 	AppData* app = (AppData*)ptr;
 	static Chip8Quirks tempQuirks;
+	static ConfigData tmpConfig;
 	switch (message)
 	{
 	case WM_INITDIALOG:
@@ -268,6 +280,7 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		CheckDlgButton(hDlg, IDC_CHECK2, app->config.quirks.shift ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK3, app->config.quirks.memoryLeaveIUnchanged ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK4, app->config.quirks.memoryIncrementByX ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK5, app->config.vSync ? BST_CHECKED : BST_UNCHECKED);
 		break;
 	case WM_COMMAND: {
 		WORD low = LOWORD(wParam);
@@ -285,18 +298,19 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 				BOOL checked = SendMessage(hCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
 				switch (low) {
 				case IDC_CHECK1:
-					tempQuirks.resetVF = checked;
+					tmpConfig.quirks.resetVF = checked;
 					break;
 				case IDC_CHECK2:
-					tempQuirks.shift = checked;
+					tmpConfig.quirks.shift = checked;
 					break;
 				case IDC_CHECK3:
-					tempQuirks.memoryLeaveIUnchanged = checked;
+					tmpConfig.quirks.memoryLeaveIUnchanged = checked;
 					break;
 				case IDC_CHECK4:
-					tempQuirks.memoryIncrementByX = checked;
+					tmpConfig.quirks.memoryIncrementByX = checked;
 					break;
 				case IDC_CHECK5:
+					tmpConfig.vSync = checked;
 					break;
 				case IDC_CHECK6:
 					break;
@@ -309,7 +323,8 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 			EndDialog(hDlg, IDCANCEL);
 			break;
 		case IDC_CONFIG_OK:
-			app->config.quirks = tempQuirks;
+			app->config.quirks = tmpConfig.quirks;
+			app->config.vSync = tmpConfig.vSync;
 			// TODO: operator= overloading
 			// save config
 			EndDialog(hDlg, IDOK);

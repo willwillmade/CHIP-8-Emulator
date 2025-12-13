@@ -45,7 +45,10 @@ static void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLin
 struct ConfigData {
 	int fps;
 	bool fadingPixel;
+	bool vSync;
 	Chip8Quirks quirks;
+	ConfigData() : fps(60), fadingPixel(false), vSync(true)
+	{}
 };
 
 struct AppData {
