@@ -271,6 +271,8 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 	AppData* app = (AppData*)ptr;
 	static Chip8Quirks tempQuirks;
 	static ConfigData tmpConfig;
+	const int MAX_TEXT_LEN = 256;
+	TCHAR text[MAX_TEXT_LEN];
 	switch (message)
 	{
 	case WM_INITDIALOG:
@@ -281,6 +283,13 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		CheckDlgButton(hDlg, IDC_CHECK3, app->config.quirks.memoryLeaveIUnchanged ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK4, app->config.quirks.memoryIncrementByX ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK5, app->config.vSync ? BST_CHECKED : BST_UNCHECKED);
+		{
+			HWND hStatic = GetDlgItem(hDlg, IDC_FPS_TEXT);
+			int len = GetWindowText(hStatic, text, MAX_TEXT_LEN);
+			if (len > 0) {
+				MessageBox(hDlg, text, _T("Current Static Text"), MB_OK);
+			}
+		}
 		break;
 	case WM_COMMAND: {
 		WORD low = LOWORD(wParam);
