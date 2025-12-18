@@ -7,6 +7,7 @@
 #include "winmain.h"
 
 #include <commdlg.h>
+#include <Commctrl.h>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -124,7 +125,6 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&startingTime);
 	bool readyToDraw = false;
-	int fps = 60;
 	bool running = true;
 	MSG msg;
 	while (running) {
@@ -210,7 +210,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 			elapsedMicroseconds.QuadPart = endingTime.QuadPart - startingTime.QuadPart;
 			elapsedMicroseconds.QuadPart *= 1000000;
 			elapsedMicroseconds.QuadPart /= frequency.QuadPart;
-			if (elapsedMicroseconds.QuadPart > 1000000 / fps) {
+			if (elapsedMicroseconds.QuadPart > 1000000 / app.config.fps) {
 				QueryPerformanceCounter(&startingTime);
 				output_debug_string_f(_T("%lu\n"), elapsedMicroseconds.QuadPart);
 
@@ -271,19 +271,21 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 	AppData* app = (AppData*)ptr;
 	static Chip8Quirks tempQuirks;
 	static ConfigData tmpConfig;
-	const int MAX_TEXT_LEN = 256;
-	TCHAR text[MAX_TEXT_LEN];
 	switch (message)
 	{
-	case WM_INITDIALOG:
+	case WM_INITDIALOG: {
 		SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
 		app = (AppData*)lParam;
-		CheckDlgButton(hDlg, IDC_CHECK1, app->config.quirks.resetVF ? BST_CHECKED: BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK1, app->config.quirks.resetVF ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK2, app->config.quirks.shift ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK3, app->config.quirks.memoryLeaveIUnchanged ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK4, app->config.quirks.memoryIncrementByX ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK5, app->config.vSync ? BST_CHECKED : BST_UNCHECKED);
+		HWND slider = GetDlgItem(hDlg, IDC_FPS_SLIDER);
+		SendMessage(slider, TBM_SETRANGE, (WPARAM)TRUE, (LPARAM)MAKELONG(30, 120));
 		SetDlgItemInt(hDlg, IDC_FPS_TEXT, app->config.fps, FALSE);
+		SendMessage(slider, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)app->config.fps);
+	}
 		break;
 	case WM_COMMAND: {
 		WORD low = LOWORD(wParam);
@@ -315,8 +317,6 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 				case IDC_CHECK5:
 					tmpConfig.vSync = checked;
 					break;
-				case IDC_CHECK6:
-					break;
 				}
 			}
 			break;
@@ -325,13 +325,28 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		case IDC_CONFIG_CANCEL:
 			EndDialog(hDlg, IDCANCEL);
 			break;
-		case IDC_CONFIG_OK:
+		case IDC_CONFIG_OK: {
+
 			app->config.quirks = tmpConfig.quirks;
 			app->config.vSync = tmpConfig.vSync;
+			BOOL translated;
+			UINT fps = GetDlgItemInt(hDlg, IDC_FPS_TEXT, &translated, FALSE);
+			if (translated) {
+				app->config.fps = fps;
+			}
 			// TODO: operator= overloading
 			// save config
 			EndDialog(hDlg, IDOK);
+		}
 			break;
+		}
+	}
+		break;
+	case WM_HSCROLL: {
+		HWND slider = (HWND)lParam;
+		if (slider == GetDlgItem(hDlg, IDC_FPS_SLIDER)) {
+			int value = (int)SendMessage(slider, TBM_GETPOS, 0, 0);
+			SetDlgItemInt(hDlg, IDC_FPS_TEXT, value, FALSE);
 		}
 	}
 		break;
