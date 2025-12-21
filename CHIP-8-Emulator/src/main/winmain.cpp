@@ -281,6 +281,7 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 		CheckDlgButton(hDlg, IDC_CHECK3, app->config.quirks.memoryLeaveIUnchanged ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK4, app->config.quirks.memoryIncrementByX ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_CHECK5, app->config.vSync ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_CHECK6, app->config.fadingPixel ? BST_CHECKED : BST_UNCHECKED);
 		HWND slider = GetDlgItem(hDlg, IDC_FPS_SLIDER);
 		SendMessage(slider, TBM_SETRANGE, (WPARAM)TRUE, (LPARAM)MAKELONG(30, 120));
 		SetDlgItemInt(hDlg, IDC_FPS_TEXT, app->config.fps, FALSE);
@@ -317,6 +318,9 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 				case IDC_CHECK5:
 					tmpConfig.vSync = checked;
 					break;
+				case IDC_CHECK6:
+					tmpConfig.fadingPixel = checked;
+					break;
 				}
 			}
 			break;
@@ -329,6 +333,7 @@ INT_PTR CALLBACK config_proc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
 
 			app->config.quirks = tmpConfig.quirks;
 			app->config.vSync = tmpConfig.vSync;
+			app->config.fadingPixel = tmpConfig.fadingPixel;
 			BOOL translated;
 			UINT fps = GetDlgItemInt(hDlg, IDC_FPS_TEXT, &translated, FALSE);
 			if (translated) {
