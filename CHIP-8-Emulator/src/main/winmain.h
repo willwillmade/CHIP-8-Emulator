@@ -11,6 +11,9 @@
 #endif
 #include <Windows.h>
 #include "glad/glad.h"
+#include <vector>
+
+using std::vector;
 
 #pragma region Platform
 const TCHAR className[] = _T("CHIP-8 Emulator");
@@ -41,6 +44,14 @@ static void draw_grayscale_2d(GLuint textureID, GLint srcWidth, GLint srcHeight,
 static void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLint srcWidth, GLint srcHeight, GLubyte* pixels);
 #pragma endregion
 
+#pragma region OpenAL
+#include "AL/al.h"
+#include "AL/alc.h"
+
+static bool init_openal(ALCdevice** device, ALCcontext** context);
+//static ALuint gen_al_source();
+#pragma
+
 #pragma region App
 struct ConfigData {
 	int fps;
@@ -52,8 +63,8 @@ struct ConfigData {
 };
 
 struct AppData {
-	bool needResize;
-	int width, height;
+	bool needResize{};
+	int width{}, height{};
 	ConfigData config;
 };
 
@@ -65,6 +76,8 @@ static void chip8_map_to_screen(float xScale, float yScale, GLuint vbo, GLuint t
 // https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
 static void chip8_keydown_events(MSG& msg, Chip8& chip8);
 static void chip8_keyup_events(MSG& msg, Chip8& chip8);
+
+static vector<short> generate_beep_data(int frequency, int durationMs, int sampleRate);
 #pragma endregion
 
 #endif // WIN_MAIN_H

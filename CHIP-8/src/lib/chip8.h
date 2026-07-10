@@ -25,7 +25,7 @@ struct Chip8Quirks {
 	bool shift;
 
 	// I mixed memoryIncrementByX & memoryLeaveIUnchanged
-	bool increamentI;
+	bool increamentI{};
 
 	//// if memoryLeaveIUnchanged is false, check memoryIncrementByX to determine the increment value.
 	// false
@@ -41,11 +41,11 @@ struct Chip8Quirks {
 	// false
 	// true for XO-CHIP: wrap
 	// false: clip
-	bool wrap;
+	bool wrap{};
 
 	// true: BMMM for CHIP-8, XO-CHIP
 	// false: BXMM for CHIP-48, SCHIP-*
-	bool jump;
+	bool jump{};
 };
 
 // * 2048-byte RAM

@@ -20,11 +20,8 @@
 
 #include "wgl_loader.h"
 
-
-using std::vector;
 using std::fill;
 using std::begin;
-using std::wstring;
 using std::cout;
 using std::endl;
 using std::cerr;
@@ -116,6 +113,12 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 
 		glGenTextures(1, &screenTextureID);
 		set_texture_paramaters(screenTextureID, GL_CLAMP_TO_EDGE, GL_NEAREST);
+	}
+
+	ALCdevice* device = nullptr;
+	ALCcontext* context = nullptr;
+	if (!init_openal(&device, &context)) {
+		cerr << "Failed to initialize OpenAL" << endl;
 	}
 
 	Chip8 chip8;
@@ -557,6 +560,30 @@ void draw_grayscale_2d(GLuint vbo, GLuint textureID, GLsizei stride, GLint srcWi
 }
 #pragma endregion
 
+#pragma region OpenAL
+bool init_openal(ALCdevice** device, ALCcontext** context)
+{
+	*device = alcOpenDevice(nullptr);
+	if (!*device) {
+		cerr << "Failed to open OpenAL device." << endl;
+		return false;
+	}
+	*context = alcCreateContext(*device, nullptr);
+	if (!*context) {
+		cerr << "Failed to create OpenAL context." << endl;
+		alcCloseDevice(*device);
+		return false;
+	}
+	if (!alcMakeContextCurrent(*context)) {
+		cerr << "Failed to make OpenAL context current." << endl;
+		alcDestroyContext(*context);
+		alcCloseDevice(*device);
+		return false;
+	}
+	return true;
+}
+#pragma endregion
+
 #pragma region App
 void update_pixels(GLubyte* pixels, int& pixelNum, int comp)
 {
@@ -669,5 +696,16 @@ void chip8_keyup_events(MSG& msg, Chip8& chip8)
 	case 'V': chip8.on_key_up(0xF); break;
 	default: break;
 	}
+}
+
+vector<short> generate_beep_data(int frequency, int durationMs, int sampleRate)
+{
+	const int sampleCount = (durationMs * sampleRate) / 1000;
+	vector<short> data(sampleCount);
+	for (int i = 0; i < sampleCount; ++i) {
+		double t = i / static_cast<double>(sampleRate);
+		data[i] = static_cast<short>(sin(2.0 * 3.141592654 * frequency * t) * 32767);
+	}
+	return data;
 }
 #pragma endregion
