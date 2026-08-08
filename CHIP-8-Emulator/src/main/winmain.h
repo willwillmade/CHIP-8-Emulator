@@ -78,6 +78,7 @@ static void chip8_keydown_events(MSG& msg, Chip8& chip8);
 static void chip8_keyup_events(MSG& msg, Chip8& chip8);
 
 static vector<short> generate_beep_data(int frequency, int durationMs, int sampleRate);
+vector<int16_t> generate_beep_data(float frequency, float sampleRate);
 #pragma endregion
 
 #endif // WIN_MAIN_H

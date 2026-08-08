@@ -14,6 +14,7 @@
 #include <iterator>
 #include <cstdlib>
 #include <string>
+#include <cmath>
 
 #include "resource.h"
 #include "win_glcontext.h"
@@ -25,6 +26,7 @@ using std::begin;
 using std::cout;
 using std::endl;
 using std::cerr;
+using std::round;
 
 #pragma region Platform
 int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLine, int nCmdShow)
@@ -120,8 +122,43 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 	if (!init_openal(&device, &context)) {
 		cerr << "Failed to initialize OpenAL" << endl;
 	}
+	vector<int16_t> doBuff = generate_beep_data(261.63f, 44100.0f);
+	output_debug_string_f(_T("caller vector object: %d\n"), static_cast<const void*>(&doBuff));
+	constexpr ALsizei sampleRate = 44100;
+
+	ALuint audioBuffer = 0;
+	ALuint audioSource = 0;
+
+	// 建立OpenAL buffer
+	alGenBuffers(1, &audioBuffer);
+
+	// 把doBuff的PCM資料複製進OpenAL
+	alBufferData(
+		audioBuffer,
+		AL_FORMAT_MONO16,
+		doBuff.data(),
+		static_cast<ALsizei>(doBuff.size() * sizeof(int16_t)),
+		sampleRate
+	);
+
+	// 建立播放來源
+	alGenSources(1, &audioSource);
+
+	// 將buffer掛到source
+	alSourcei(audioSource, AL_BUFFER, static_cast<ALint>(audioBuffer));
+
+	// 基本播放參數
+	alSourcef(audioSource, AL_PITCH, 1.0f);
+	//alSourcef(audioSource, AL_GAIN, 0.25f);
+
+	// doBuff只有一個週期，因此循環播放
+	//alSourcei(audioSource, AL_LOOPING, AL_TRUE);
+
+	// 開始播放
+	//alSourcePlay(audioSource);
 
 	Chip8 chip8;
+	uint8_t lastSoundTimer = 0;
 
 	LARGE_INTEGER startingTime, endingTime, elapsedMicroseconds;
 	LARGE_INTEGER frequency;
@@ -216,6 +253,15 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PTSTR pCmdLin
 			if (elapsedMicroseconds.QuadPart > 1000000 / app.config.fps) {
 				QueryPerformanceCounter(&startingTime);
 				output_debug_string_f(_T("%lu\n"), elapsedMicroseconds.QuadPart);
+				
+				if (lastSoundTimer == 0 && chip8.get_sound_timer() > 0) {
+					lastSoundTimer = chip8.get_sound_timer();
+					alSourcePlay(audioSource);
+				}
+				else if (lastSoundTimer > 0 && chip8.get_sound_timer() == 0) {
+					lastSoundTimer = 0;
+					alSourceStop(audioSource);
+				}
 
 				chip8.countdown();
 
@@ -706,6 +752,46 @@ vector<short> generate_beep_data(int frequency, int durationMs, int sampleRate)
 		double t = i / static_cast<double>(sampleRate);
 		data[i] = static_cast<short>(sin(2.0 * 3.141592654 * frequency * t) * 32767);
 	}
+	return data;
+}
+
+vector<int16_t> generate_beep_data(float frequency, float sampleRate)
+{
+	constexpr int cycleCount = 100;
+	const int sampleCount = round(cycleCount * sampleRate / frequency);
+	vector<int16_t> data(sampleCount);
+	output_debug_string_f(_T("local vector object: %d\n"), static_cast<const void*>(&data));
+	for (int i = 0; i < sampleCount; ++i) {
+		float angle = (2.0f * 3.141592654 * cycleCount * i) / sampleCount;
+		data[i] = (int16_t)(sin(angle) * 32767);
+	}
+	return data;
+
+	/*// Intentionally stop after a quarter cycle instead of a zero crossing.
+	// When OpenAL loops this buffer, the waveform jumps from approximately
+	// +12000 back to 0, making the discontinuity easy to hear.
+	constexpr int completeCycles = 26;
+	constexpr float extraCycles = 0.25f;
+	const float bufferCycles = completeCycles + extraCycles;
+	const int sampleCount = static_cast<int>(
+		round(bufferCycles * sampleRate / frequency)
+	);
+
+	vector<int16_t> data(sampleCount);
+	for (int i = 0; i < sampleCount; ++i) {
+		const float angle =
+			2.0f * 3.141592654f * frequency * i / sampleRate;
+		data[i] = static_cast<int16_t>(sin(angle) * 12000);
+	}
+
+	cout << "Loop duration: "
+		<< 1000.0f * sampleCount / sampleRate
+		<< " ms\n";
+	cout << "First sample: " << data.front()
+		<< ", last sample: " << data.back()
+		<< ", next loop sample: " << data.front()
+		<< endl;*/
+
 	return data;
 }
 #pragma endregion
